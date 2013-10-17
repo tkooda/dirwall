@@ -1,0 +1,272 @@
+#!/bin/bash
+
+## dirwall : v0.11 : a linux iptables firewall script
+##  - Thor Kooda <tkooda-dirwall@devsec.org>
+
+## setup..
+DIRWALL="/etc/dirwall"
+CONFIG_DATA="$DIRWALL/config"
+CONFIG_SCRIPTS="$DIRWALL/scripts"
+CONFIG_ACCEPT="$DIRWALL/ACCEPT"
+CONFIG_FORWARD="$DIRWALL/FORWARD"
+CONFIG_MASQ="$DIRWALL/MASQ"
+CONFIG_NAT="$DIRWALL/NAT"
+CONFIG_NOLOG="$DIRWALL/NOLOG"
+CONFIG_REJECT="$DIRWALL/REJECT"
+
+## setup global functions..
+function bail { echo "$1"; exit 1; }
+function get_token { echo "`cut -d'#' -f1 $1 2>/dev/null |grep '\w' |head -1 |awk '{print $1}'`"; }
+function get_tokens { echo "`cut -d'#' -f1 $1 2>/dev/null |grep '\w'`"; }
+
+## dependency checks..
+[ -x "`which perl`" ] || bail "Error: perl not found"
+[ -d "$CONFIG_DATA" ] || bail "Error: $CONFIG_DATA dir not found"
+[ -d "$CONFIG_SCRIPTS" ] || bail "Error: $CONFIG_SCRIPTS dir not found"
+
+## read local config data..
+VERBOSE="`get_token $CONFIG_DATA/VERBOSE`"
+DEBUG="`get_token $CONFIG_DATA/DEBUG`"
+LOG="`get_token $CONFIG_DATA/LOG`"
+LOG_FLOOD="`get_token $CONFIG_DATA/LOG_FLOOD`"
+LOG_LEVEL="`get_token $CONFIG_DATA/LOG_LEVEL`"
+ALLOW_ICMP="`get_tokens $CONFIG_DATA/ALLOW_ICMP`"
+POLICY_FILTER_INPUT="`get_token $CONFIG_DATA/POLICY_FILTER_INPUT`"
+POLICY_FILTER_FORWARD="`get_token $CONFIG_DATA/POLICY_FILTER_FORWARD`"
+POLICY_FILTER_OUTPUT="`get_token $CONFIG_DATA/POLICY_FILTER_OUTPUT`"
+POLICY_NAT_PREROUTING="`get_token $CONFIG_DATA/POLICY_NAT_PREROUTING`"
+POLICY_NAT_POSTROUTING="`get_token $CONFIG_DATA/POLICY_NAT_POSTROUTING`"
+POLICY_NAT_OUTPUT="`get_token $CONFIG_DATA/POLICY_NAT_OUTPUT`"
+RPFILTER="`get_token $CONFIG_DATA/RPFILTER`"
+FORWARD="`get_token $CONFIG_DATA/FORWARD`"
+
+## run local config scripts..
+IFACE_WAN="`$CONFIG_SCRIPTS/iface-wan`"
+
+## setup config defaults if no local config specified..
+DEBUG="${DEBUG:-0}"
+VERBOSE="${VERBOSE:-0}"
+LOG="${LOG:-0}"
+LOG_FLOOD="${LOG_FLOOD:-10/s}"
+LOG_LEVEL="${LOG_LEVEL:-debug}"
+ALLOW_ICMP="${ALLOW_ICMP:-echo-request echo-reply time-exceed destination-unreachable parameter-problem}"
+RPFILTER="${RPFILTER:-1}"
+FORWARD="${FORWARD:-1}"
+POLICY_FILTER_INPUT="${POLICY_FILTER_INPUT:-ACCEPT}"
+POLICY_FILTER_FORWARD="${POLICY_FILTER_FORWARD:-ACCEPT}"
+POLICY_FILTER_OUTPUT="${POLICY_FILTER_OUTPUT:-ACCEPT}"
+POLICY_NAT_PREROUTING="${POLICY_NAT_PREROUTING:-ACCEPT}"
+POLICY_NAT_POSTROUTING="${POLICY_NAT_POSTROUTING:-ACCEPT}"
+POLICY_NAT_OUTPUT="${POLICY_NAT_OUTPUT:-ACCEPT}"
+
+## program functions..
+function ipt {
+    [ "$DEBUG" == "1" ] && echo /sbin/iptables "$@";
+    [ "$CHECK" == "1" ] || /sbin/iptables "$@";
+}
+function put {
+    [ "$DEBUG" == "1" ] && echo "echo $1 > $2";
+    [ "$CHECK" == "1" ] || echo "$1" > "$2";
+}
+function runscript {
+    [ "$DEBUG" == "1" ] && grep -H ^ "$@";
+    [ "$CHECK" == "1" ] || . "$@";
+}
+function out { [ "$VERBOSE" == "1" ] && echo "$@"; }
+function get_ip1 { v=$(echo $1|perl -pe 's/^([^:<>\=]+)?.*/$1/g';);echo ${v:-'0/0'};}
+function get_p1  { v=$(echo $1|perl -pe 's/^([^:<>]+)?(\:([^:<>\=]+))?.*/$3/g;s/,/ /g';);echo ${v:-':'};}
+function get_ip2 { v=$(echo $1|perl -pe 's/(.*>([^:<>\=]+))?.*/$2/g';);echo ${v:-'0/0'};}
+function get_p2  { v=$(echo $1|perl -pe 's/(.*>(.*(:([^:<>\=]+)))?)?.*/$4/g;s/,/ /g';);echo ${v:-':'};}
+function get_p   { v=$(echo $1|perl -pe 's/(.*<([^:<>\=]+)?)?.*/$2/g';);echo ${v:-'tcp,udp'};}
+function get_x   { v=$(echo $1|perl -pe 's/(.*=(.*)?)?.*/$2/g';);echo ${v:-'0'};} # extras
+function ipt_flush {
+  ipt -t filter -F
+  ipt -t filter -X
+  ipt -t nat -F
+  ipt -t nat -X
+  put "$FORWARD" "/proc/sys/net/ipv4/ip_forward"
+  # rp_filter is required until interfaces are supported..
+  if [ -e /proc/sys/net/ipv4/conf/all/rp_filter ]; then
+    for f in /proc/sys/net/ipv4/conf/*/rp_filter; do
+      put "$RPFILTER" "$f"
+    done
+  fi
+}
+function ipt_openpolicy {
+  ipt -t filter -P INPUT ACCEPT
+  ipt -t filter -P FORWARD ACCEPT
+  ipt -t filter -P OUTPUT ACCEPT
+  ipt -t nat -P PREROUTING ACCEPT
+  ipt -t nat -P POSTROUTING ACCEPT
+  ipt -t nat -P OUTPUT ACCEPT
+}
+function bailsafe { ipt_flush; ipt_openpolicy; bail "$@"; }
+function parsetoken {
+  ip1r="`get_ip1 $1`"
+  p1r="`get_p1 $1`"
+  ip2r="`get_ip2 $1`"
+  p2r="`get_p2 $1`"
+  pr="`get_p $1`"
+  x="`get_x $1`"
+  for p in ${pr//,/ }; do
+    for ip1 in ${ip1r//,/ }; do
+      for ip2 in ${ip2r//,/ }; do
+        for p1 in ${p1r//,/ }; do
+          for p2 in ${p2r//,/ }; do
+	      echo "$ip1" "${p1//-/:}" "$ip2" "${p2//-/:}" "$p" "$x"
+           done
+        done
+      done
+    done
+  done
+}
+
+
+## process argv..
+[ "$1" == "check" ] && CHECK=1
+case "$1" in
+  list)
+    for table in filter nat; do
+      echo "$table table:"
+      ipt -t "$table" -nL
+      echo; echo
+    done
+    exit 0
+    ;;
+  start|stop|restart|reload|check)
+    ;;
+  *)
+    bail "Usage: `basename $0` start|stop|reload|restart|list|check"
+    ;;
+esac
+
+## stop firewall..
+[ "$1" == "stop" ] && bailsafe "Dirwall: stopped."
+
+## flush/delete everything..
+ipt_flush
+
+## setup default chain policies..
+ipt -t filter -P INPUT "$POLICY_FILTER_INPUT"
+ipt -t filter -P FORWARD "$POLICY_FILTER_FORWARD"
+ipt -t filter -P OUTPUT "$POLICY_FILTER_OUTPUT"
+ipt -t nat -P PREROUTING "$POLICY_NAT_PREROUTING"
+ipt -t nat -P POSTROUTING "$POLICY_NAT_POSTROUTING"
+ipt -t nat -P OUTPUT "$POLICY_NAT_OUTPUT"
+
+## run custom local iptables commands..
+[ -x "$CONFIG_SCRIPTS/dirwall-begin" ] \
+  && runscript "$CONFIG_SCRIPTS/dirwall-begin"
+
+## setup internal DROP chain..
+ipt -t filter -N DIRWALL_DROP
+ipt -t filter -A DIRWALL_DROP -p tcp -j REJECT --reject-with tcp-reset
+ipt -t filter -A DIRWALL_DROP ! -p tcp -j REJECT \
+    --reject-with icmp-port-unreachable
+ipt -t filter -A DIRWALL_DROP -j DROP
+
+## setup chains..
+# allow local traffic..
+ipt -t filter -A INPUT -i lo -j ACCEPT
+# allow some icmp..
+for icmp in $ALLOW_ICMP; do
+  ipt -t filter -A INPUT -p icmp --icmp-type "$icmp" -j ACCEPT
+done
+# allow established/related..
+ipt -t filter -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+CHAINS="REJECT MASQ FORWARD NAT ACCEPT"
+# drop invalid..
+ipt -t filter -A INPUT -m state --state INVALID -j DROP
+# setup internal LOG chain (if desired)..
+if [ "$LOG" == "1" ]; then
+  ipt -t filter -N DIRWALL_LOG
+  CHAINS="NOLOG $CHAINS"
+fi
+# use rules to setup other chains..
+for chain in $CHAINS; do
+  rules=`ls -1 $DIRWALL/$chain/ |grep -v '~'`
+  [ -n "$rules" ] && out "$chain:"
+  for rule in $rules; do
+    for token in `get_tokens $DIRWALL/$chain/$rule`; do
+      out "  $rule: $token"
+      parsetoken "$token" \
+        | while read ip1 p1 ip2 p2 p x; do
+            case $chain in
+              ACCEPT )
+                if [ "$p" == "tcp" -o "$p" == "udp" ]; then
+                  ipt -t filter -A INPUT -p "$p" -s "$ip1" --sport "$p1" \
+		      -d "$ip2" --dport "$p2" -j ACCEPT
+                else
+                  ipt -t filter -A INPUT -p "$p" -s "$ip1" -d "$ip2" -j ACCEPT
+                fi
+                ;;
+              FORWARD )
+		if [ "$p" == "tcp" -o "$p" == "udp" ]; then
+                  ipt -t nat -A PREROUTING -p "$p" -d "$ip1" \
+		      --dport "$p1" -j DNAT \
+		      --to-destination "$ip2:${p2//:/$p1}"
+                  ipt -t filter -A FORWARD -p "$p" -d "$ip2" \
+		      --dport "${p2//:/$p1}" -j ACCEPT
+		fi
+                ;;
+              MASQ )
+                ipt -t filter -A FORWARD -s "$ip1" -j ACCEPT
+                ipt -t filter -A FORWARD -d "$ip1" \
+		    -m state --state ESTABLISHED,RELATED -j ACCEPT
+                ipt -t nat -A POSTROUTING -s "$ip1" -o "$IFACE_WAN" \
+		    -j MASQUERADE
+                ;;
+              NAT )
+                ipt -t nat -A PREROUTING -d "$ip1" -j DNAT \
+		    --to-destination "$ip2"
+                ipt -t filter -A FORWARD -i "$IFACE_WAN" -d "$ip2" -j ACCEPT
+                ipt -t nat -A POSTROUTING -s "$ip2" -j SNAT --to-source "$ip1"
+                if [ "$x" != "0" ]; then
+                  ipt -t nat -A POSTROUTING -s "$x" -d "$ip2" \
+		      -j SNAT --to-source "${x%/*}"
+                fi
+                ;;
+              NOLOG )
+                if [ "$p" == "tcp" -o "$p" == "udp" ]; then
+                  ipt -t filter -A DIRWALL_LOG -p "$p" -s "$ip1" \
+		      --sport "$p1" -d "$ip2" --dport "$p2" -j DIRWALL_DROP
+                else
+                  ipt -t filter -A DIRWALL_LOG -p "$p" -s "$ip1" -d "$ip2" \
+		      -j DIRWALL_DROP
+                fi
+                ;;
+              REJECT )
+                if [ "$p" == "tcp" -o "$p" == "udp" ]; then
+                  ipt -t filter -A INPUT -p "$p" -s "$ip1" --sport "$p1" \
+		      -d "$ip2" --dport "$p2" -j DIRWALL_DROP
+                else
+                  ipt -t filter -A INPUT -p "$p" -s "$ip1" -d "$ip2" \
+		      -j DIRWALL_DROP
+                fi
+                ;;
+            esac
+          done
+    done
+  done
+done
+
+## run custom local iptables commands..
+[ -x "$CONFIG_SCRIPTS/dirwall-end" ] && runscript "$CONFIG_SCRIPTS/dirwall-end"
+
+## finish INPUT chain..
+if [ "$LOG" == "1" ]; then
+  ipt -t filter -A DIRWALL_LOG -p tcp -m limit --limit "$LOG_FLOOD" \
+      -j LOG --log-level "$LOG_LEVEL" --log-prefix 'rejected_tcp '
+  ipt -t filter -A DIRWALL_LOG -p udp -m limit --limit "$LOG_FLOOD" \
+      -j LOG --log-level "$LOG_LEVEL" --log-prefix 'rejected_udp '
+  ipt -t filter -A DIRWALL_LOG -p icmp -m limit --limit "$LOG_FLOOD" \
+      -j LOG --log-level "$LOG_LEVEL" --log-prefix 'rejected_icmp '
+  ipt -t filter -A DIRWALL_LOG -j DIRWALL_DROP
+  ipt -t filter -A INPUT -j DIRWALL_LOG
+else
+  ipt -t filter -A INPUT -j DIRWALL_DROP
+fi
+
+echo "Dirwall: started."
+
+exit 0

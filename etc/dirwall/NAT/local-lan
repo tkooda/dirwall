@@ -1,0 +1,5 @@
+# example: SNAT/DNAT an external ip to a lan ip
+# rule syntax:  external>internal<protocol=internal_gateway/mask
+#  (the protocol is really ignored, but something is required to
+#   prevent the rule from being run twice (default protocol: "tcp,udp"))
+# 1.2.3.4>10.0.0.16<any=10.0.0.1/24

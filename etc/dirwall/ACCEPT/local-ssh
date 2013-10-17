@@ -1,0 +1,2 @@
+# example: allow public ssh access
+# >:22<tcp

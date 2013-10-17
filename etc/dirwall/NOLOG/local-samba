@@ -1,0 +1,2 @@
+# example: don't log smb (tcp and udp)
+# >:135,137-139,443

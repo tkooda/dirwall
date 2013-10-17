@@ -1,0 +1,2 @@
+# example: reject samba traffic (tcp and udp)
+# >:135,137-139,443

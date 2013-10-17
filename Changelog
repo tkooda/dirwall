@@ -1,0 +1,15 @@
+dirwall changelog
+=================
+
+v0.11 - 2004-07-08
+
+  * added REJECT target support
+  * added nat table flushing and setting of default nat table policies
+  * renamed default filter policy config files to support nat policies
+  * better documentation
+
+
+v0.10 - 2004-06-24
+
+  * cleaned up for public release
+

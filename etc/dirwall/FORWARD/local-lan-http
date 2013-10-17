@@ -1,0 +1,2 @@
+# example: forward port 81 into port 80 on a machine in the lan
+# 1.2.3.4:81>10.0.0.17:80<tcp

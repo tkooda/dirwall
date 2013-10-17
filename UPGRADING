@@ -1,0 +1,7 @@
+v0.11 - 2004-07-08
+
+  * the default filter policy config files have moved from:
+      /etc/dirwall/config/POLICY_{FORWARD,INPUT,OUTPUT}
+    to:
+      /etc/dirwall/config/POLICY_FILTER_{FORWARD,INPUT,OUTPUT}
+

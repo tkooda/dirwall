@@ -1,0 +1,2 @@
+# example: allow public ftp access
+# >:20-21<tcp

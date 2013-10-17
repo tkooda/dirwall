@@ -1,0 +1,12 @@
+To install:
+-----------
+
+  make install
+
+
+To remove:
+----------
+
+  make remove
+  rm -r /etc/dirwall
+

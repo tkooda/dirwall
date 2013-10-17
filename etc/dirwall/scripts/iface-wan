@@ -1,0 +1,6 @@
+#!/bin/bash
+
+## iface-wan : print the wan interface (default route)
+
+echo "eth0"
+
