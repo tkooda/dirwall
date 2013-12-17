@@ -5,6 +5,7 @@ dirwall
 
   I wrote this because I wanted to have the ability to have useful
 iptables rules described in a concice and (hopefully) sane format.
+
   I separated the rules from the script logic to make it easier to
 update the script without touching the actual rules.  This also
 makes it easy for other packages to manage the rules.
@@ -27,19 +28,33 @@ simpler than the iptables commands they generate.
 ## CONFIG FILES (in "/etc/dirwall/config/"):
 
   VERBOSE - boolean to enable verbose output
+
   DEBUG - boolean to enable debugging
+
   LOG - boolean to enable logging via syslog
+
   LOG_FLOOD - log flood limit
+
   LOG_LEVEL - syslog log level
+
   ALLOW_ICMP - icmp types to allow
+
   RPFILTER - boolean to enable rp_filter (required until interfaces supported)
+
   FORWARD - boolean to enable forwarding ("/proc/sys/net/ipv4/ip_forward")
+
   POLICY_FILTER_INPUT - filter chain input target default policy
+
   POLICY_FILTER_FORWARD - filter chain forward target default policy
+
   POLICY_FILTER_OUTPUT - filter chain output target default policy
+
   POLICY_NAT_PREROUTING - nat chain prerouting target default policy
+
   POLICY_NAT_POSTROUTING - nat chain postrouting target default policy
+
   POLICY_NAT_OUTPUT - nat chain output target default policy
+
 
 (all config files are optional)
 
@@ -59,8 +74,10 @@ simpler than the iptables commands they generate.
 
   The dirwall rules are stored in rule files located in 
 "/etc/dirwall/{ACCEPT,FORWARD,MASQ,NAT,NOLOG,REJECT}/*".
+
   There may be multiple rules per file, seperated by whitespaces.
 Comments starting with a '#' are allowed anywhere in the rule files.
+
   The rule filenames are reserved for packages that have that name (i.e.
 the "ssh" package has the right to manage the "/etc/dirwall/ACCEPT/ssh"
 rule file).  Local rule files should begin with the word "local-" so
@@ -70,15 +87,25 @@ that they don't conflict.
 ## RULE SYNTAX:
 
   rule      = [ hostlist ] [ ">" hostlist ] [ "<" proto ] [ "=" extra ]
+
   hostlist  = [ host [ "," host [...] ] ] [ ":" portlist ]
+
   host      = [ [ ip [ "/" mask ] ]
+
   ip        = ( ipv4 dotted decimal address | dns host address )
+
   mask      = ( ipv4 dotted decimal bitmask | integer bitmask )
+
   portlist  = [ portrange [ "," portrange [...] ] ]
+
   portrange = [ port [ "-" port ] ]
+
   port      = ( ipv4 port integer )
+
   proto     = "tcp" | "udp" | "icmp" | "all" | ( other from /etc/protocols )
+
   extra     = [ host ]
+
 
 
 ## RULE EXAMPLES:
